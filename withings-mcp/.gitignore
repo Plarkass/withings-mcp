@@ -1,0 +1,6 @@
+# Secrets OAuth et données de santé : jamais dans git
+config/*
+data/*
+!config/.gitkeep
+!data/.gitkeep
+.env
