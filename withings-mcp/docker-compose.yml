@@ -1,0 +1,51 @@
+services:
+  # Network-accessible MCP server:
+  #   - streamable HTTP: http://<host>:8586/mcp
+  #   - SSE:             http://<host>:8586/sse
+  withings-mcp:
+    build: .
+    image: withings-mcp:latest
+    container_name: withings-mcp
+    restart: unless-stopped
+    ports:
+      - "${WITHINGS_MCP_PORT:-8586}:8586"
+    environment:
+      - TZ=${TZ:-Europe/Paris}
+    volumes:
+      - ./config:/config
+      - ./data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8586/status', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # Interactive OAuth setup (one time only):
+  #   docker compose run --rm auth
+  # The Withings callback listens on localhost:8585, hence network_mode: host.
+  auth:
+    build: .
+    image: withings-mcp:latest
+    profiles: ["setup"]
+    network_mode: host
+    stdin_open: true
+    tty: true
+    command: ["withings-mcp", "auth"]
+    environment:
+      - TZ=${TZ:-Europe/Paris}
+    volumes:
+      - ./config:/config
+
+  # Manual or scheduled sync (cron / Dockhand schedule):
+  #   docker compose run --rm sync
+  sync:
+    build: .
+    image: withings-mcp:latest
+    profiles: ["setup"]
+    command: ["withings-mcp", "sync", "--days", "${WITHINGS_SYNC_DAYS:-30}"]
+    environment:
+      - TZ=${TZ:-Europe/Paris}
+    volumes:
+      - ./config:/config
+      - ./data:/data
