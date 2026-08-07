@@ -1,16 +1,16 @@
-# Serveur MCP Withings (partymola/withings-mcp) exposé en HTTP/SSE via mcp-proxy,
-# sur le modèle du déploiement Docker de Taxuspt/garmin_mcp.
+# Withings MCP server (partymola/withings-mcp) exposed over HTTP/SSE via mcp-proxy,
+# modeled on the Docker deployment of Taxuspt/garmin_mcp.
 FROM python:3.13-slim
 
-# withings-mcp épingle mcp==2.0.0 alors que mcp-proxy 0.12.0 exige mcp<2 :
-# les deux vivent dans des venvs isolés, mcp-proxy lançant withings-mcp en
-# sous-processus via le PATH (aucune dépendance Python partagée).
+# withings-mcp pins mcp==2.0.0 while mcp-proxy 0.12.0 requires mcp<2:
+# each lives in its own isolated venv, with mcp-proxy spawning withings-mcp
+# as a subprocess via PATH (no shared Python dependencies).
 ENV PYTHONUNBUFFERED=1 \
     WITHINGS_MCP_CONFIG_DIR=/config \
     WITHINGS_MCP_DB_PATH=/data/withings.db \
     PATH="/opt/withings/bin:/opt/proxy/bin:${PATH}"
 
-# withings-mcp n'est pas publié sur PyPI : installation depuis GitHub, commit épinglé.
+# withings-mcp is not published on PyPI: install from GitHub at a pinned commit.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git \
     && python -m venv /opt/withings \
@@ -26,6 +26,6 @@ VOLUME ["/config", "/data"]
 
 EXPOSE 8586
 
-# Mode serveur HTTP par défaut ; les services one-shot (auth, sync) du compose
-# remplacent cette commande par "withings-mcp auth" / "withings-mcp sync".
+# HTTP server mode by default; the one-shot compose services (auth, sync)
+# override this command with "withings-mcp auth" / "withings-mcp sync".
 CMD ["mcp-proxy", "--host", "0.0.0.0", "--port", "8586", "--pass-environment", "withings-mcp"]

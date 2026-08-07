@@ -1,99 +1,100 @@
-# Withings MCP — déploiement Docker
+# Withings MCP — Docker deployment
 
-Déploiement Docker d'un serveur MCP Withings, sur le même modèle que
-[Taxuspt/garmin_mcp](https://github.com/Taxuspt/garmin_mcp) : image auto-suffisante,
-tokens OAuth persistés dans un volume, cache local des données, et exposition HTTP
-pour les clients MCP distants (Claude Code, Claude Desktop, Home Assistant, etc.).
+Docker deployment of a Withings MCP server, modeled on
+[Taxuspt/garmin_mcp](https://github.com/Taxuspt/garmin_mcp): self-contained image,
+OAuth tokens persisted in a volume, local data cache, and HTTP exposure for remote
+MCP clients (Claude Code, Claude Desktop, Home Assistant, etc.).
 
-## Implémentation retenue
+## Chosen implementation
 
-Parmi les quatre implémentations candidates, c'est
-[**partymola/withings-mcp**](https://github.com/partymola/withings-mcp) qui est utilisée :
+Among the four candidate implementations,
+[**partymola/withings-mcp**](https://github.com/partymola/withings-mcp) is the one used:
 
-| Implémentation | Langage | Transport | Pourquoi pas ? |
+| Implementation | Language | Transport | Why not? |
 |---|---|---|---|
-| **partymola/withings-mcp** ✅ | Python 3.13 | stdio | La plus proche de garmin_mcp : cache SQLite incrémental, refresh automatique des tokens, 8 outils (corps, sommeil, activité, workouts, ECG, tendances), zéro dépendance hors `mcp` |
-| [gchallen/withings-mcp](https://github.com/gchallen/withings-mcp) | TypeScript/Bun | stdio | Couverture limitée (poids/composition corporelle), tokens stockés dans `.env` |
-| [davidmosiah/withings-mcp](https://github.com/davidmosiah/withings-mcp) | TypeScript/Node | stdio | Pas de support Docker, config sous `~/.withings-mcp` peu adaptée au conteneur |
-| [akutishevsky/withings-mcp](https://github.com/akutishevsky/withings-mcp) | TypeScript/Bun | HTTP | Nécessite Supabase + secret de chiffrement : trop lourd pour un usage perso |
+| **partymola/withings-mcp** ✅ | Python 3.13 | stdio | Closest to garmin_mcp: incremental SQLite cache, automatic token refresh, 8 tools (body, sleep, activity, workouts, ECG, trends), zero dependencies beyond `mcp` |
+| [gchallen/withings-mcp](https://github.com/gchallen/withings-mcp) | TypeScript/Bun | stdio | Limited coverage (weight/body composition), tokens stored in `.env` |
+| [davidmosiah/withings-mcp](https://github.com/davidmosiah/withings-mcp) | TypeScript/Node | stdio | No Docker support, `~/.withings-mcp` config poorly suited to containers |
+| [akutishevsky/withings-mcp](https://github.com/akutishevsky/withings-mcp) | TypeScript/Bun | HTTP | Requires Supabase + encryption secret: too heavy for personal use |
 
-Le serveur étant stdio-only, l'image ajoute
-[`mcp-proxy`](https://github.com/sparfenyuk/mcp-proxy) pour l'exposer en réseau :
+Since the server is stdio-only, the image adds
+[`mcp-proxy`](https://github.com/sparfenyuk/mcp-proxy) to expose it over the network:
 
-- **Streamable HTTP** : `http://<hôte>:8586/mcp`
-- **SSE** : `http://<hôte>:8586/sse`
-- **Healthcheck** : `http://<hôte>:8586/status`
+- **Streamable HTTP**: `http://<host>:8586/mcp`
+- **SSE**: `http://<host>:8586/sse`
+- **Healthcheck**: `http://<host>:8586/status`
 
-`withings-mcp` n'étant pas encore publié sur PyPI, le Dockerfile l'installe depuis
-GitHub avec un **commit épinglé** (`f250123`) pour un build reproductible.
+As `withings-mcp` is not yet published on PyPI, the Dockerfile installs it from
+GitHub at a **pinned commit** (`f250123`) for a reproducible build.
 
-> Note : `withings-mcp` épingle `mcp==2.0.0` alors que `mcp-proxy` exige `mcp<2`.
-> L'image les installe donc dans deux venvs isolés (`/opt/withings`, `/opt/proxy`),
-> mcp-proxy lançant withings-mcp en sous-processus — aucune dépendance partagée.
+> Note: `withings-mcp` pins `mcp==2.0.0` while `mcp-proxy` requires `mcp<2`.
+> The image therefore installs them in two isolated venvs (`/opt/withings`,
+> `/opt/proxy`), with mcp-proxy spawning withings-mcp as a subprocess — no shared
+> dependencies.
 
-## Prérequis
+## Prerequisites
 
-1. Un compte développeur Withings : https://developer.withings.com/dashboard
-2. Créer une application avec :
-   - **Callback URL** : `http://localhost:8585`
-   - **Scopes** : `user.info,user.metrics,user.activity`
-3. Noter le *Client ID* et le *Client Secret*.
+1. A Withings developer account: https://developer.withings.com/dashboard
+2. Create an application with:
+   - **Callback URL**: `http://localhost:8585`
+   - **Scopes**: `user.info,user.metrics,user.activity`
+3. Note the *Client ID* and *Client Secret*.
 
-## Mise en route
+## Getting started
 
 ```bash
 cd withings-mcp
-cp .env.example .env        # optionnel : port, TZ, profondeur de sync
+cp .env.example .env        # optional: port, TZ, sync depth
 
-# 1. Construire l'image
+# 1. Build the image
 docker compose build
 
-# 2. Authentification OAuth (une seule fois, interactif)
+# 2. OAuth setup (one time only, interactive)
 docker compose run --rm auth
 ```
 
-L'étape `auth` demande le Client ID/Secret, affiche l'URL d'autorisation Withings à
-ouvrir dans le navigateur, puis capture le callback sur `localhost:8585` et sauvegarde
-les tokens dans `./config/` (montés dans le conteneur). Le refresh token est valable
-1 an et se renouvelle automatiquement à l'usage.
+The `auth` step prompts for the Client ID/Secret, prints the Withings authorization
+URL to open in your browser, then captures the callback on `localhost:8585` and saves
+the tokens to `./config/` (mounted into the container). The refresh token is valid
+for 1 year and renews itself automatically with use.
 
-> **Serveur distant (headless)** : le callback doit atteindre `localhost:8585` de la
-> machine où tourne le conteneur. Depuis votre poste, ouvrez un tunnel SSH avant de
-> cliquer sur l'URL d'autorisation :
+> **Remote (headless) server**: the callback must reach `localhost:8585` on the
+> machine running the container. From your workstation, open an SSH tunnel before
+> clicking the authorization URL:
 > ```bash
-> ssh -L 8585:localhost:8585 utilisateur@serveur
+> ssh -L 8585:localhost:8585 user@server
 > ```
 
 ```bash
-# 3. Premier remplissage du cache (30 jours par défaut, cf. WITHINGS_SYNC_DAYS)
+# 3. Initial cache population (30 days by default, see WITHINGS_SYNC_DAYS)
 docker compose run --rm sync
 
-# 4. Démarrer le serveur MCP
+# 4. Start the MCP server
 docker compose up -d
-docker compose ps    # le healthcheck doit passer "healthy"
+docker compose ps    # the healthcheck should report "healthy"
 ```
 
-## Connexion des clients MCP
+## Connecting MCP clients
 
-**Claude Code** (transport HTTP) :
+**Claude Code** (HTTP transport):
 
 ```bash
-claude mcp add -s user --transport http withings http://<hôte>:8586/mcp
+claude mcp add -s user --transport http withings http://<host>:8586/mcp
 ```
 
-**Claude Desktop / clients SSE** — `claude_desktop_config.json` :
+**Claude Desktop / SSE clients** — `claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
     "withings": {
-      "url": "http://<hôte>:8586/sse"
+      "url": "http://<host>:8586/sse"
     }
   }
 }
 ```
 
-**Alternative stdio pure** (sans le proxy HTTP, comme garmin_mcp en local) :
+**Pure stdio alternative** (without the HTTP proxy, like garmin_mcp locally):
 
 ```json
 {
@@ -102,8 +103,8 @@ claude mcp add -s user --transport http withings http://<hôte>:8586/mcp
       "command": "docker",
       "args": [
         "run", "-i", "--rm",
-        "-v", "/chemin/vers/withings-mcp/config:/config",
-        "-v", "/chemin/vers/withings-mcp/data:/data",
+        "-v", "/path/to/withings-mcp/config:/config",
+        "-v", "/path/to/withings-mcp/data:/data",
         "withings-mcp:latest",
         "withings-mcp"
       ]
@@ -112,45 +113,45 @@ claude mcp add -s user --transport http withings http://<hôte>:8586/mcp
 }
 ```
 
-## Synchronisation planifiée
+## Scheduled sync
 
-Les outils de lecture resynchronisent d'eux-mêmes quand le cache est périmé, mais une
-sync régulière garde les réponses instantanées. Exemple cron sur l'hôte Docker :
+The query tools re-sync on their own when the cache is stale, but a regular sync
+keeps responses instant. Example cron entry on the Docker host:
 
 ```cron
-0 6 * * * cd /chemin/vers/deploy/withings-mcp && docker compose run --rm sync >> /var/log/withings-sync.log 2>&1
+0 6 * * * cd /path/to/deploy/withings-mcp && docker compose run --rm sync >> /var/log/withings-sync.log 2>&1
 ```
 
-(Équivalent possible via un *schedule* Dockhand ou une automatisation Home Assistant.)
+(A Dockhand schedule or a Home Assistant automation works just as well.)
 
-## Outils exposés
+## Exposed tools
 
-| Outil | Description | Source |
+| Tool | Description | Source |
 |---|---|---|
-| `withings_sync` | Synchronise l'API Withings vers le cache local | API → SQLite |
-| `withings_get_body` | Composition corporelle (poids, masse grasse, muscle, os, tension, SpO2) | Cache |
-| `withings_get_sleep` | Résumés de sommeil, ou phases détaillées avec `detail=True` | Cache / API |
-| `withings_get_activity` | Pas, distance, calories, temps actif par jour | Cache |
-| `withings_get_workouts` | Séances d'entraînement (type, durée, FC) | Cache |
-| `withings_get_heart` | Enregistrements ECG et détection AFib | API (toujours) |
-| `withings_get_devices` | Appareils connectés et niveau de batterie | API (toujours) |
-| `withings_trends` | Moyennes par période, tendances, comparaisons | Cache |
+| `withings_sync` | Syncs the Withings API into the local cache | API → SQLite |
+| `withings_get_body` | Body composition (weight, fat, muscle, bone, BP, SpO2) | Cache |
+| `withings_get_sleep` | Sleep summaries, or detailed phases with `detail=True` | Cache / API |
+| `withings_get_activity` | Daily steps, distance, calories, active time | Cache |
+| `withings_get_workouts` | Workout sessions (type, duration, HR) | Cache |
+| `withings_get_heart` | ECG recordings and AFib detection | API (always) |
+| `withings_get_devices` | Connected devices and battery level | API (always) |
+| `withings_trends` | Period averages, trends, comparisons | Cache |
 
-## Arborescence et données
+## Layout and data
 
 ```
 withings-mcp/
-├── Dockerfile            # image : withings-mcp (commit épinglé) + mcp-proxy
-├── docker-compose.yml    # services : withings-mcp (serveur), auth, sync (one-shot)
+├── Dockerfile            # image: withings-mcp (pinned commit) + mcp-proxy
+├── docker-compose.yml    # services: withings-mcp (server), auth, sync (one-shot)
 ├── .env.example
-├── config/               # withings_client.json + withings_tokens.json (gitignoré)
-└── data/                 # withings.db, cache SQLite (gitignoré)
+├── config/               # withings_client.json + withings_tokens.json (gitignored)
+└── data/                 # withings.db, SQLite cache (gitignored)
 ```
 
-Les secrets OAuth et la base de données de santé restent sur l'hôte, exclus de git
-par le `.gitignore`. Sauvegardez `config/` si vous voulez éviter de refaire l'OAuth
-après une réinstallation.
+OAuth secrets and the health database stay on the host, excluded from git by the
+`.gitignore`. Back up `config/` if you want to avoid redoing the OAuth flow after
+a reinstall.
 
-> ⚠️ Le port 8586 n'a **aucune authentification** : quiconque y accède peut lire vos
-> données de santé. Ne l'exposez que sur un réseau de confiance (LAN, VPN, réseau
-> Docker interne) — jamais directement sur Internet.
+> ⚠️ Port 8586 has **no authentication**: anyone who can reach it can read your
+> health data. Only expose it on a trusted network (LAN, VPN, internal Docker
+> network) — never directly on the Internet.

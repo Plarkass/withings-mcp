@@ -1,7 +1,7 @@
 services:
-  # Serveur MCP accessible en réseau :
-  #   - streamable HTTP : http://<hôte>:8586/mcp
-  #   - SSE             : http://<hôte>:8586/sse
+  # Network-accessible MCP server:
+  #   - streamable HTTP: http://<host>:8586/mcp
+  #   - SSE:             http://<host>:8586/sse
   withings-mcp:
     build: .
     image: withings-mcp:latest
@@ -21,9 +21,9 @@ services:
       retries: 3
       start_period: 15s
 
-  # Authentification OAuth interactive (une seule fois) :
+  # Interactive OAuth setup (one time only):
   #   docker compose run --rm auth
-  # Le callback Withings écoute sur localhost:8585, d'où network_mode: host.
+  # The Withings callback listens on localhost:8585, hence network_mode: host.
   auth:
     build: .
     image: withings-mcp:latest
@@ -37,7 +37,7 @@ services:
     volumes:
       - ./config:/config
 
-  # Synchronisation manuelle ou planifiée (cron / Dockhand schedule) :
+  # Manual or scheduled sync (cron / Dockhand schedule):
   #   docker compose run --rm sync
   sync:
     build: .

@@ -3,4 +3,4 @@ TerraformDeployment
 
 ## Services
 
-- [`withings-mcp/`](withings-mcp/) — serveur MCP Withings (santé : poids, sommeil, activité) en Docker, exposé en HTTP/SSE via mcp-proxy.
+- [`withings-mcp/`](withings-mcp/) — Withings MCP server (health: weight, sleep, activity) in Docker, exposed over HTTP/SSE via mcp-proxy.
