@@ -1,10 +1,15 @@
 # Withings MCP server (partymola/withings-mcp) exposed over HTTP/SSE via mcp-proxy,
 # modeled on the Docker deployment of Taxuspt/garmin_mcp.
-FROM python:3.13-slim
+#
+# Base image pinned by digest (python:3.13-slim as of 2026-08-10) so rebuilds are
+# reproducible. Bump it deliberately to pick up base-image security updates.
+FROM python:3.13-slim@sha256:ffb752e139c0a19692a43af8d8523b274222dd68eebad5d583b45c2201c6e30a
 
-# withings-mcp pins mcp==2.0.0 while mcp-proxy 0.12.0 requires mcp<2:
-# each lives in its own isolated venv, with mcp-proxy spawning withings-mcp
-# as a subprocess via PATH (no shared Python dependencies).
+# withings-mcp pins mcp==2.0.0. mcp-proxy 0.12.0 declares only mcp>=1.17.0, but it
+# breaks at import against 2.x ("cannot import name 'request_ctx' from
+# mcp.server.lowlevel.server") — a real runtime incompatibility that the metadata
+# does not express. Hence two isolated venvs, with mcp-proxy spawning withings-mcp
+# as a subprocess via PATH: no shared Python dependencies.
 ENV PYTHONUNBUFFERED=1 \
     WITHINGS_MCP_CONFIG_DIR=/config \
     WITHINGS_MCP_DB_PATH=/data/withings.db \
@@ -22,7 +27,15 @@ RUN apt-get update \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
 
+# Run unprivileged: /config holds the client secret and a year-long refresh token.
+# Host-side bind mounts must be owned by this uid (see README).
+RUN useradd --system --uid 10001 --create-home withings \
+    && mkdir -p /config /data \
+    && chown -R 10001:10001 /config /data
+
 VOLUME ["/config", "/data"]
+
+USER withings
 
 EXPOSE 8586
 
