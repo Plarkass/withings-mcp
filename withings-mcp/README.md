@@ -20,17 +20,21 @@ Among the four candidate implementations,
 Since the server is stdio-only, the image adds
 [`mcp-proxy`](https://github.com/sparfenyuk/mcp-proxy) to expose it over the network:
 
-- **Streamable HTTP**: `http://<host>:8586/mcp`
-- **SSE**: `http://<host>:8586/sse`
-- **Healthcheck**: `http://<host>:8586/status`
+- **Streamable HTTP**: `http://127.0.0.1:8586/mcp`
+- **SSE**: `http://127.0.0.1:8586/sse`
+- **Healthcheck**: `http://127.0.0.1:8586/status`
+
+The port is published on loopback only by default — see [Configuration](#configuration).
 
 As `withings-mcp` is not yet published on PyPI, the Dockerfile installs it from
 GitHub at a **pinned commit** (`f250123`) for a reproducible build.
 
-> Note: `withings-mcp` pins `mcp==2.0.0` while `mcp-proxy` requires `mcp<2`.
-> The image therefore installs them in two isolated venvs (`/opt/withings`,
-> `/opt/proxy`), with mcp-proxy spawning withings-mcp as a subprocess — no shared
-> dependencies.
+> Note: `withings-mcp` pins `mcp==2.0.0`. `mcp-proxy` 0.12.0 declares only
+> `mcp>=1.17.0`, but it fails at import against 2.x (`cannot import name
+> 'request_ctx' from mcp.server.lowlevel.server`) — a real incompatibility its
+> metadata does not express. The image therefore installs them in two isolated
+> venvs (`/opt/withings`, `/opt/proxy`), with mcp-proxy spawning withings-mcp as a
+> subprocess — no shared dependencies.
 
 ## Prerequisites
 
@@ -44,7 +48,11 @@ GitHub at a **pinned commit** (`f250123`) for a reproducible build.
 
 ```bash
 cd withings-mcp
-cp .env.example .env        # optional: port, TZ, sync depth
+cp .env.example .env        # optional: bind address, port, TZ, sync depth
+
+# The container runs as uid 10001, so the bind-mounted directories must be
+# writable by it.
+mkdir -p config data && sudo chown -R 10001:10001 config data
 
 # 1. Build the image
 docker compose build
@@ -66,7 +74,8 @@ for 1 year and renews itself automatically with use.
 > ```
 
 ```bash
-# 3. Initial cache population (30 days by default, see WITHINGS_SYNC_DAYS)
+# 3. Initial cache population, with the server still stopped
+#    (30 days by default, see WITHINGS_SYNC_DAYS)
 docker compose run --rm sync
 
 # 4. Start the MCP server
@@ -76,10 +85,16 @@ docker compose ps    # the healthcheck should report "healthy"
 
 ## Connecting MCP clients
 
-**Claude Code** (HTTP transport):
+**Claude Code** (HTTP transport), on the Docker host itself:
 
 ```bash
-claude mcp add -s user --transport http withings http://<host>:8586/mcp
+claude mcp add -s user --transport http withings http://127.0.0.1:8586/mcp
+```
+
+From another machine, forward the port rather than publishing it:
+
+```bash
+ssh -L 8586:127.0.0.1:8586 user@server
 ```
 
 **Claude Desktop / SSE clients** — `claude_desktop_config.json`:
@@ -88,7 +103,7 @@ claude mcp add -s user --transport http withings http://<host>:8586/mcp
 {
   "mcpServers": {
     "withings": {
-      "url": "http://<host>:8586/sse"
+      "url": "http://127.0.0.1:8586/sse"
     }
   }
 }
@@ -113,16 +128,39 @@ claude mcp add -s user --transport http withings http://<host>:8586/mcp
 }
 ```
 
-## Scheduled sync
+## Keeping the cache fresh
 
-The query tools re-sync on their own when the cache is stale, but a regular sync
-keeps responses instant. Example cron entry on the Docker host:
+**Do not schedule `docker compose run --rm sync` against a running server.** The
+query tools already auto-sync when their data is stale, in the server's own
+process, so a scheduled sync buys nothing — and it actively breaks things:
+
+Withings rotates the refresh token on every use, and upstream caches tokens in
+module-level state that it reads once and never re-reads
+([`auth.py`](https://github.com/partymola/withings-mcp/blob/main/src/withings_mcp/auth.py)).
+A separate `sync` container rotating the token on disk therefore leaves the
+long-running server holding a token Withings has already invalidated. Every tool
+call then fails with `Token refresh failed. Run: withings-mcp auth`, and
+`restart: unless-stopped` cannot recover it because the process never exits.
+
+The two processes also open the same SQLite file, which upstream opens without WAL
+and with the default 5-second busy timeout, so overlapping access can surface as
+`database is locked`.
+
+If you do want a scheduled sync, restart the server immediately afterwards so it
+re-reads the rotated token:
 
 ```cron
-0 6 * * * cd /path/to/deploy/withings-mcp && docker compose run --rm sync >> /var/log/withings-sync.log 2>&1
+0 6 * * * cd /path/to/withings-mcp && docker compose run --rm sync && docker compose restart withings-mcp
 ```
 
-(A Dockhand schedule or a Home Assistant automation works just as well.)
+## Configuration
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `WITHINGS_MCP_BIND` | `127.0.0.1` | Host address the port is published on |
+| `WITHINGS_MCP_PORT` | `8586` | Host port |
+| `WITHINGS_SYNC_DAYS` | `30` | History depth for the one-shot `sync` |
+| `TZ` | `Europe/Paris` | Container timezone |
 
 ## Exposed tools
 
@@ -152,6 +190,9 @@ OAuth secrets and the health database stay on the host, excluded from git by the
 `.gitignore`. Back up `config/` if you want to avoid redoing the OAuth flow after
 a reinstall.
 
-> ⚠️ Port 8586 has **no authentication**: anyone who can reach it can read your
-> health data. Only expose it on a trusted network (LAN, VPN, internal Docker
-> network) — never directly on the Internet.
+> ⚠️ mcp-proxy has **no authentication** — no token, no bearer, nothing. Anyone who
+> can reach port 8586 can read your weight, sleep, blood pressure and ECG history.
+> That is why it is bound to `127.0.0.1` by default. If you set
+> `WITHINGS_MCP_BIND=0.0.0.0`, remember that Docker inserts its port rules ahead of
+> ufw/firewalld, so a host firewall will *not* protect it — put a VPN or an
+> authenticating reverse proxy in front instead.

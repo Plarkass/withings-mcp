@@ -1,14 +1,21 @@
 services:
-  # Network-accessible MCP server:
-  #   - streamable HTTP: http://<host>:8586/mcp
-  #   - SSE:             http://<host>:8586/sse
+  # MCP server:
+  #   - streamable HTTP: http://127.0.0.1:8586/mcp
+  #   - SSE:             http://127.0.0.1:8586/sse
+  #
+  # Bound to loopback by default: mcp-proxy has no authentication of any kind, so
+  # anyone who can reach this port can read your weight, sleep, blood pressure and
+  # ECG data. Reach it from another machine over an SSH tunnel, a VPN, or an
+  # authenticating reverse proxy. Setting WITHINGS_MCP_BIND=0.0.0.0 publishes it to
+  # every interface — note that Docker's port rules sit in front of ufw/firewalld,
+  # so a host firewall will not save you.
   withings-mcp:
     build: .
     image: withings-mcp:latest
     container_name: withings-mcp
     restart: unless-stopped
     ports:
-      - "${WITHINGS_MCP_PORT:-8586}:8586"
+      - "${WITHINGS_MCP_BIND:-127.0.0.1}:${WITHINGS_MCP_PORT:-8586}:8586"
     environment:
       - TZ=${TZ:-Europe/Paris}
     volumes:
@@ -37,8 +44,14 @@ services:
     volumes:
       - ./config:/config
 
-  # Manual or scheduled sync (cron / Dockhand schedule):
+  # One-shot sync, for the initial cache fill:
   #   docker compose run --rm sync
+  #
+  # Run this while the server is STOPPED. Both processes keep their own in-memory
+  # copy of the OAuth tokens and Withings rotates the refresh token on every use,
+  # so a sync run alongside the running server leaves the server holding a dead
+  # refresh token until it is restarted. The server auto-syncs on its own anyway —
+  # see the README before scheduling this.
   sync:
     build: .
     image: withings-mcp:latest
