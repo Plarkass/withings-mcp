@@ -59,21 +59,7 @@ docker compose build
 
 # 2. OAuth setup (one time only, interactive)
 docker compose run --rm auth
-```
 
-The `auth` step prompts for the Client ID/Secret, prints the Withings authorization
-URL to open in your browser, then captures the callback on `localhost:8585` and saves
-the tokens to `./config/` (mounted into the container). The refresh token is valid
-for 1 year and renews itself automatically with use.
-
-> **Remote (headless) server**: the callback must reach `localhost:8585` on the
-> machine running the container. From your workstation, open an SSH tunnel before
-> clicking the authorization URL:
-> ```bash
-> ssh -L 8585:localhost:8585 user@server
-> ```
-
-```bash
 # 3. Initial cache population, with the server still stopped
 #    (30 days by default, see WITHINGS_SYNC_DAYS)
 docker compose run --rm sync
@@ -82,6 +68,95 @@ docker compose run --rm sync
 docker compose up -d
 docker compose ps    # the healthcheck should report "healthy"
 ```
+
+## Authentication: how `withings-mcp auth` works
+
+Withings uses OAuth 2.0 with an authorization code. You never give the server
+your Withings password — you approve it once in the browser, and it keeps a
+refresh token from then on.
+
+### What happens, step by step
+
+`docker compose run --rm auth` runs `withings-mcp auth` interactively:
+
+1. **Credentials.** It prompts for the *Client ID* and *Client Secret* of the app
+   you registered at [developer.withings.com](https://developer.withings.com/dashboard),
+   and writes them to `config/withings_client.json` with mode `0600`. On later
+   runs it offers to reuse them instead of asking again.
+2. **Authorization URL.** It generates a random `state` (32 bytes, for CSRF
+   protection), builds the URL to
+   `https://account.withings.com/oauth2_user/authorize2` with your client id, the
+   scopes `user.info,user.metrics,user.activity` and the redirect
+   `http://localhost:8585`, then opens your browser — and prints the URL as well,
+   in case it cannot.
+3. **You approve** in the Withings page, with your own Withings account.
+4. **Callback.** Withings redirects to `http://localhost:8585/?code=…&state=…`.
+   A one-shot HTTP server, started on port 8585 for this purpose, receives it. It
+   first checks the returned `state` matches the one it generated — a mismatch is
+   rejected as a possible CSRF attempt — then reads the authorization `code`.
+5. **Token exchange.** The code is exchanged **immediately, inside the callback
+   handler**: Withings authorization codes expire after about 30 seconds, so the
+   exchange cannot wait for the little web server to shut down. It POSTs to
+   `https://wbsapi.withings.net/v2/oauth2` with `action=requesttoken`,
+   `grant_type=authorization_code`, your client id and secret, the code and the
+   same redirect URI. (Withings signals errors in a JSON `status` field rather
+   than the HTTP status, so a `status` other than `0` is a failure even on a
+   200 response.)
+6. **Storage.** The response yields an access token, a refresh token, your
+   Withings `userid` and a lifetime. They are written to
+   `config/withings_tokens.json`, mode `0600`, with an absolute `expires_at`
+   computed from `expires_in` (3 hours by default). The step ends with
+   `Tokens saved. User ID: …`.
+
+The whole exchange waits at most 120 seconds; if you do not approve in time, it
+exits with an error and you simply rerun it.
+
+### Where the tokens live
+
+Both files sit in `./config/` on the host, bind-mounted into the container at
+`/config` (`WITHINGS_MCP_CONFIG_DIR`):
+
+| File | Contents |
+|---|---|
+| `config/withings_client.json` | `client_id`, `client_secret` |
+| `config/withings_tokens.json` | `access_token`, `refresh_token`, `userid`, `expires_at` |
+
+Both are `0600` and excluded by `.gitignore`. **This directory is the thing to
+back up** — with it, a reinstall needs no new authorization; without it, you
+redo the flow above. Treat it exactly like a password file: the refresh token
+alone grants a year of access to your health data.
+
+### Staying authenticated afterwards
+
+The server refreshes on its own; there is nothing to schedule.
+
+- The **access token lasts 3 hours**. Before each API call the server checks
+  `expires_at` with a 5-minute safety margin.
+- If it has expired, the server posts a `grant_type=refresh_token` request and
+  rewrites `config/withings_tokens.json` with the new pair.
+- The **refresh token is valid for a year**, and Withings **rotates it on every
+  use** — each refresh returns a new one, replacing the old, which is why only a
+  single process may hold these tokens at a time (see
+  [Keeping the cache fresh](#keeping-the-cache-fresh)).
+
+### Re-running it
+
+Rerun `docker compose run --rm auth` whenever you see
+`Token refresh failed. Run: withings-mcp auth` — the usual causes are a refresh
+token unused for a year, access revoked from your Withings account, or a token
+file invalidated by a concurrent `sync`. It reuses your saved Client ID/Secret,
+so you only reapprove in the browser. Restart the server afterwards
+(`docker compose restart withings-mcp`) so it drops its in-memory copy of the old
+tokens.
+
+> **Remote (headless) server**: the callback goes to `localhost:8585` *on the
+> machine running the container* — that is why the `auth` service uses
+> `network_mode: host`. If Docker runs on a server, forward the port from your
+> workstation before clicking the authorization URL, so that your browser's
+> callback reaches the listener on the server:
+> ```bash
+> ssh -L 8585:localhost:8585 user@server
+> ```
 
 ## Connecting MCP clients
 
