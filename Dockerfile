@@ -5,8 +5,8 @@
 # reproducible. Bump it deliberately to pick up base-image security updates.
 FROM python:3.13-slim@sha256:ffb752e139c0a19692a43af8d8523b274222dd68eebad5d583b45c2201c6e30a
 
-# withings-mcp pins mcp==2.0.0. mcp-proxy 0.12.0 declares only mcp>=1.17.0, but it
-# breaks at import against 2.x ("cannot import name 'request_ctx' from
+# withings-mcp 0.8.0 pins mcp==2.1.1. mcp-proxy 0.12.0 declares only mcp>=1.17.0,
+# but it breaks at import against 2.x ("cannot import name 'request_ctx' from
 # mcp.server.lowlevel.server") — a real runtime incompatibility that the metadata
 # does not express. Hence two isolated venvs, with mcp-proxy spawning withings-mcp
 # as a subprocess via PATH: no shared Python dependencies.
@@ -15,17 +15,11 @@ ENV PYTHONUNBUFFERED=1 \
     WITHINGS_MCP_DB_PATH=/data/withings.db \
     PATH="/opt/withings/bin:/opt/proxy/bin:${PATH}"
 
-# withings-mcp is not published on PyPI: install from GitHub at a pinned commit.
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends git \
-    && python -m venv /opt/withings \
-    && /opt/withings/bin/pip install --no-cache-dir \
-        "withings-mcp @ git+https://github.com/partymola/withings-mcp.git@f250123f32eac3423bff2895425918c5f2af4d4a" \
+# Both packages come from PyPI, pinned to an exact version for reproducible builds.
+RUN python -m venv /opt/withings \
+    && /opt/withings/bin/pip install --no-cache-dir "withings-mcp==0.8.0" \
     && python -m venv /opt/proxy \
-    && /opt/proxy/bin/pip install --no-cache-dir "mcp-proxy==0.12.0" "mcp==1.29.0" \
-    && apt-get purge -y git \
-    && apt-get autoremove -y \
-    && rm -rf /var/lib/apt/lists/*
+    && /opt/proxy/bin/pip install --no-cache-dir "mcp-proxy==0.12.0" "mcp==1.29.0"
 
 # Run unprivileged: /config holds the client secret and a year-long refresh token.
 # Host-side bind mounts must be owned by this uid (see README).
