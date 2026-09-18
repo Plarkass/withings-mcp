@@ -40,10 +40,32 @@ Both use the same OAuth flow and the same on-disk token files — see
 .
 ├── Dockerfile            # withings-mcp 0.8.0 + mcp-proxy, two isolated venvs
 ├── docker-compose.yml    # services: withings-mcp (server), auth, sync (one-shot)
+├── docker-entrypoint.sh  # prints the version banner, then execs the command
+├── VERSION               # this deployment's version number
 ├── .env.example          # bind address, port, TZ, sync depth
 ├── config/               # withings_client.json + withings_tokens.json (gitignored)
 └── data/                 # withings.db, the SQLite cache (gitignored)
 ```
+
+### Which version is running
+
+Every container start writes a banner naming this deployment's version and the
+versions actually installed inside the image:
+
+```console
+$ docker compose logs withings-mcp | head -4
+withings-mcp deployment 1.0.0
+  withings-mcp  0.8.0
+  mcp-proxy     0.12.0
+  mcp           2.1.1 (server) / 1.29.0 (proxy)
+```
+
+The package versions are read from the installed distributions at startup, not
+copied from a build argument, so they cannot drift from what the image holds.
+`VERSION` is this repository's own number — bump it when you change the
+deployment. The banner goes to **stderr**, because in the stdio setups above
+stdout carries the JSON-RPC frames; `docker logs` shows it either way.
+
 
 This repo holds **deployment only**; the server itself lives upstream at
 [partymola/withings-mcp](https://github.com/partymola/withings-mcp) and is
