@@ -408,8 +408,16 @@ The image sets these to `/config` and `/data/withings.db`.
 |---|---|---|
 | `WITHINGS_MCP_BIND` | `127.0.0.1` | Host address the port is published on |
 | `WITHINGS_MCP_PORT` | `8586` | Host port |
+| `WITHINGS_MCP_CONFIG_HOST` | `./config` | Host path mounted at `/config` |
+| `WITHINGS_MCP_DATA_HOST` | `./data` | Host path mounted at `/data` |
 | `WITHINGS_SYNC_DAYS` | `30` | History depth for the one-shot `sync` service |
 | `TZ` | `Europe/Paris` | Container timezone |
+
+The two `_HOST` paths default to directories next to the compose file, which is
+what a plain `git clone` wants. Set them to absolute paths when a stack manager
+owns the deployment directory: Dockhand and Portainer regenerate their stack
+directory from the repository on every deploy, and a relative `./config` there
+means your tokens and cache live inside that regenerated directory.
 
 ---
 
