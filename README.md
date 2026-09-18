@@ -160,8 +160,10 @@ The server is then reachable at:
 - **SSE**: `http://127.0.0.1:8586/sse`
 - **Healthcheck**: `http://127.0.0.1:8586/status`
 
-The port is published on **loopback only** by default. mcp-proxy has no
-authentication whatsoever — read [Security](#security) before widening it.
+The port is published on **every interface** by default, for deployments that
+put a reverse proxy in front. mcp-proxy has no authentication whatsoever, so read
+[Security](#security) before leaving it that way — `WITHINGS_MCP_BIND=127.0.0.1`
+keeps it on loopback.
 
 ---
 
@@ -406,7 +408,7 @@ The image sets these to `/config` and `/data/withings.db`.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `WITHINGS_MCP_BIND` | `127.0.0.1` | Host address the port is published on |
+| `WITHINGS_MCP_BIND` | `0.0.0.0` | Host address the port is published on |
 | `WITHINGS_MCP_PORT` | `8586` | Host port |
 | `WITHINGS_MCP_CONFIG_HOST` | `./config` | Host path mounted at `/config` |
 | `WITHINGS_MCP_DATA_HOST` | `./data` | Host path mounted at `/data` |
@@ -461,7 +463,12 @@ re-reads the rotated token:
 
 > ⚠️ **mcp-proxy has no authentication** — no token, no bearer, nothing. Anyone
 > who can reach port 8586 can read your weight, sleep, blood pressure and ECG
-> history. That is why it is bound to `127.0.0.1` by default. If you set
-> `WITHINGS_MCP_BIND=0.0.0.0`, remember that Docker inserts its port rules ahead
-> of ufw/firewalld, so a host firewall will **not** protect it — put a VPN or an
-> authenticating reverse proxy in front instead.
+> history. The default `WITHINGS_MCP_BIND=0.0.0.0` publishes it on every
+> interface, so put something in front of it: an authenticating reverse proxy, a
+> VPN, or `WITHINGS_MCP_BIND=127.0.0.1` plus an SSH tunnel. A host firewall is
+> not that something — Docker inserts its port rules ahead of ufw/firewalld.
+>
+> A reverse proxy only covers the hostname it serves; the published port stays
+> reachable directly on the LAN. To let *only* the proxy reach it, drop the
+> `ports:` mapping and attach the container to the proxy's own Docker network
+> instead.

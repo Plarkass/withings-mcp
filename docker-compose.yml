@@ -3,19 +3,19 @@ services:
   #   - streamable HTTP: http://127.0.0.1:8586/mcp
   #   - SSE:             http://127.0.0.1:8586/sse
   #
-  # Bound to loopback by default: mcp-proxy has no authentication of any kind, so
-  # anyone who can reach this port can read your weight, sleep, blood pressure and
-  # ECG data. Reach it from another machine over an SSH tunnel, a VPN, or an
-  # authenticating reverse proxy. Setting WITHINGS_MCP_BIND=0.0.0.0 publishes it to
-  # every interface — note that Docker's port rules sit in front of ufw/firewalld,
-  # so a host firewall will not save you.
+  # Published on every interface by default, for deployments that front this with
+  # a reverse proxy. mcp-proxy has no authentication of any kind, so anyone who
+  # reaches this port can read your weight, sleep, blood pressure and ECG data —
+  # and Docker's port rules sit in front of ufw/firewalld, so a host firewall
+  # will not save you. Set WITHINGS_MCP_BIND=127.0.0.1 to keep it on loopback and
+  # reach it over an SSH tunnel or a VPN instead.
   withings-mcp:
     build: .
     image: withings-mcp:latest
     container_name: withings-mcp
     restart: unless-stopped
     ports:
-      - "${WITHINGS_MCP_BIND:-127.0.0.1}:${WITHINGS_MCP_PORT:-8586}:8586"
+      - "${WITHINGS_MCP_BIND:-0.0.0.0}:${WITHINGS_MCP_PORT:-8586}:8586"
     environment:
       - TZ=${TZ:-Europe/Paris}
     volumes:
