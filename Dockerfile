@@ -21,6 +21,14 @@ RUN python -m venv /opt/withings \
     && python -m venv /opt/proxy \
     && /opt/proxy/bin/pip install --no-cache-dir "mcp-proxy==0.12.0" "mcp==1.29.0"
 
+# Version banner on startup, written to stderr so it never lands in the stdio
+# JSON-RPC stream. VERSION is the deployment's own number, read at runtime, so no
+# build argument is needed — a stack manager that builds without --build-arg
+# still reports it correctly. Copied after the installs to keep them cached.
+COPY VERSION /etc/withings-mcp/deploy-version
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod 0755 /usr/local/bin/docker-entrypoint.sh
+
 # Run unprivileged: /config holds the client secret and a year-long refresh token.
 # Host-side bind mounts must be owned by this uid (see README).
 RUN useradd --system --uid 10001 --create-home withings \
@@ -32,6 +40,10 @@ VOLUME ["/config", "/data"]
 USER withings
 
 EXPOSE 8586
+
+# The entrypoint prints the banner and then execs the command below, so the
+# version is logged for every mode — server, auth and sync alike.
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 
 # HTTP server mode by default; the one-shot compose services (auth, sync)
 # override this command with "withings-mcp auth" / "withings-mcp sync".
